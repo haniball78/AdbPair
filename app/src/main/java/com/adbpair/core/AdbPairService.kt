@@ -330,8 +330,13 @@ class AdbPairService : Service() {
         val manager = applicationContext.getSystemService(Context.NSD_SERVICE) as android.net.nsd.NsdManager
         val latch = java.util.concurrent.CountDownLatch(1)
         val found = java.util.concurrent.atomic.AtomicInteger(-1)
-        // Why discovery ended: the 12 s wait alone cannot tell a failed
+        // Why discovery ended: the 30 s wait alone cannot tell a failed
         // start from a stopped scan from simply no dialog open.
+        // 30 s (was 12 s): the user needs time to navigate Settings to
+        // the pairing dialog in the split-screen flow — the 12 s window
+        // expired before the dialog could be opened (device-proven
+        // 2026-11-11). The episode still ends cleanly on timeout
+        // (DIALOG_DEAD -> IDLE), just later.
         val reason = java.util.concurrent.atomic.AtomicReference("timeout-no-match")
         // onServiceFound hands back an UNRESOLVED service (port 0, host
         // null) until resolveService returns. Reading serviceInfo.port
@@ -362,7 +367,7 @@ class AdbPairService : Service() {
         }
         return try {
             manager.discoverServices("_adb-tls-pairing._tcp.", android.net.nsd.NsdManager.PROTOCOL_DNS_SD, listener)
-            latch.await(12, java.util.concurrent.TimeUnit.SECONDS)
+            latch.await(30, java.util.concurrent.TimeUnit.SECONDS)
             val port = found.get().takeIf { it in 1..65535 }
             log.log("pair", "discover", mapOf("reason" to (reason.get() ?: "unknown"), "port" to (port?.toString() ?: "none")))
             port
