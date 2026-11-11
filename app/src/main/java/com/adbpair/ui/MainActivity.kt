@@ -100,6 +100,29 @@ private fun AdbPairScreen(activity: MainActivity) {
         }
     }
 
+    // Close Settings ~4 s after a successful pair (only while still split):
+    // the split was opened for pairing, and leaving Settings open after the
+    // pair wastes the screen. closeSettingsAfterPair checks
+    // isInMultiWindowMode itself, so this is a no-op when not split.
+    LaunchedEffect(state.state) {
+        if (state.state == PairingState.CONNECTED) {
+            SettingsNavigator.closeSettingsAfterPair(activity)
+        }
+    }
+
+    // Auto fresh pair: the service minted a new identity because the key
+    // was stuck 30 s, and started a fresh episode. Open Settings in split
+    // so the user can enter the new code. The episode is already started,
+    // so the stage-two callback is a no-op. (If already split, the
+    // navigator returns early — the pair row is already visible.)
+    val autoPairRequested by PairingStore.autoPairRequested.collectAsState()
+    LaunchedEffect(autoPairRequested) {
+        if (autoPairRequested) {
+            PairingStore.setAutoPairRequested(false)
+            SettingsNavigator.startPairing(activity) { }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()

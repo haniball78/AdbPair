@@ -34,6 +34,20 @@ object PairingStore {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
+    /**
+     * One-shot signal: the service auto-minted a fresh identity because a
+     * key was stuck (30 s, no connect) and started a fresh episode.
+     * MainActivity observes it and opens Settings in split-screen so the
+     * user can enter the new code. In-memory only (not persisted); cleared
+     * by the UI after it acts on it.
+     */
+    private val _autoPairRequested = MutableStateFlow(false)
+    val autoPairRequested: StateFlow<Boolean> = _autoPairRequested.asStateFlow()
+
+    fun setAutoPairRequested(value: Boolean) {
+        _autoPairRequested.value = value
+    }
+
     fun update(transform: (UiState) -> UiState) {
         _state.value = transform(_state.value)
     }

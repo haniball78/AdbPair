@@ -89,6 +89,22 @@ class PairingStateMachineTest {
     }
 
     @Test
+    fun `a fresh pair stuck 30s auto-freshes, nothing else does`() {
+        // PAIRING_WAIT_KEY + >30 s since the pair: stuck, auto-fresh.
+        assertEquals(true, PairingStateMachine.shouldAutoFreshKey(PairingState.PAIRING_WAIT_KEY, 30_001L))
+        assertEquals(true, PairingStateMachine.shouldAutoFreshKey(PairingState.PAIRING_WAIT_KEY, 120_000L))
+        // PAIRING_WAIT_KEY + <=30 s: still within the landing window.
+        assertEquals(false, PairingStateMachine.shouldAutoFreshKey(PairingState.PAIRING_WAIT_KEY, 30_000L))
+        assertEquals(false, PairingStateMachine.shouldAutoFreshKey(PairingState.PAIRING_WAIT_KEY, 5_000L))
+        // No pair at all (null elapsed): never auto-fresh.
+        assertEquals(false, PairingStateMachine.shouldAutoFreshKey(PairingState.PAIRING_WAIT_KEY, null))
+        // PARKED_AUTH (an old identity failing) and CONNECTED: never
+        // auto-fresh, however long it has been.
+        assertEquals(false, PairingStateMachine.shouldAutoFreshKey(PairingState.PARKED_AUTH, 120_000L))
+        assertEquals(false, PairingStateMachine.shouldAutoFreshKey(PairingState.CONNECTED, 120_000L))
+    }
+
+    @Test
     fun `patient retry exhausts at fourteen`() {
         assertEquals(false, PairingStateMachine.patientRetryExhausted(13))
         assertEquals(true, PairingStateMachine.patientRetryExhausted(14))

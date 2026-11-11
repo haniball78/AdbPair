@@ -147,6 +147,14 @@ class PairingStateMachine {
          * attempts (60 s); after that the normal 30 s delay resumes. */
         const val PATIENT_RETRY_FAST_DELAY_MS = 5_000L
         const val PATIENT_RETRY_FAST_ATTEMPTS = 12
+        /**
+         * Auto fresh identity: if a fresh pair's key has not landed 30 s
+         * after the pair, the key is stuck — mint a new identity and start
+         * a fresh episode automatically instead of waiting for the user to
+         * tap. (User order 2026-11-11: 30 s with no response → new identity
+         * + request a connection, automatically.)
+         */
+        const val AUTO_FRESH_STUCK_KEY_MS = 30_000L
         const val PAIR_TIMEOUT_MS = 60_000L
         const val RESUME_BUDGET_MS = 8_000L
         const val CONNECT_TIMEOUT_MS = 5_000L
@@ -162,5 +170,17 @@ class PairingStateMachine {
             } else {
                 PATIENT_RETRY_DELAY_MS
             }
+
+        /**
+         * Whether a fresh pair's key is stuck and the app should mint a new
+         * identity automatically. True only while waiting for a fresh pair's
+         * key (PAIRING_WAIT_KEY) and more than 30 s have passed since the
+         * pair with no connect. A null elapsed time (no pair) never
+         * auto-freshes.
+         */
+        fun shouldAutoFreshKey(state: PairingState, elapsedSincePairMs: Long?): Boolean =
+            state == PairingState.PAIRING_WAIT_KEY &&
+                elapsedSincePairMs != null &&
+                elapsedSincePairMs > AUTO_FRESH_STUCK_KEY_MS
     }
 }

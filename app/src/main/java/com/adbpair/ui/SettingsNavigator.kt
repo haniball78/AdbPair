@@ -55,6 +55,13 @@ object SettingsNavigator {
      * dismiss an already-open pairing dialog, and a backgrounded activity
      * may not be able to start the service (device-proven 2026-11-11 —
      * every submit failed because the dialog died after the switch).
+     *
+     * Split order matters: the adjacent-task launch goes FIRST, while this
+     * activity is still resumed. It explicitly targets a new task adjacent
+     * to ours, so it can split even when Settings is already open (a plain
+     * LAUNCH_ADJACENT relaunch reuses the existing fullscreen task and
+     * never splits — user-reported 2026-11-11). The flag launch is the
+     * fallback; a 400 ms retry is the safety net for a slow engage.
      */
     fun startPairing(activity: Activity, onStageTwo: () -> Unit) {
         onStageTwo()
@@ -65,10 +72,17 @@ object SettingsNavigator {
             // Just start the episode; the pair row is already visible.
             return
         }
-        val intent = developmentSettingsIntent().apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+        if (!launchAdjacentTask(activity)) {
+            val applied = launchAdjacent(
+                activity,
+                developmentSettingsIntent().apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
+                },
+            )
+            if (!applied) {
+                launchAdjacentTaskOrPlain(activity)
+            }
         }
-        val applied = launchAdjacent(activity, intent)
         Handler(Looper.getMainLooper()).postDelayed({
             if (!activity.isInMultiWindowMode) {
                 // The split did not engage: retry into a new task adjacent
@@ -77,9 +91,6 @@ object SettingsNavigator {
                 launchAdjacentTaskOrPlain(activity)
             }
         }, PAIRING_STAGE_DELAY_MS)
-        if (!applied) {
-            launchAdjacentTaskOrPlain(activity)
-        }
     }
 
     /** Adjacent-task retry, falling back to a plain launch when unavailable. */

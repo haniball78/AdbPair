@@ -243,6 +243,21 @@ class AdbPairService : Service() {
     private suspend fun patientRetry(host: String, port: Int) {
         var attempts = 0
         while (machine.state == PairingState.PARKED_AUTH || machine.state == PairingState.PAIRING_WAIT_KEY) {
+            // Auto fresh identity: a fresh pair's key stuck 30 s with no
+            // connect is a stuck key — mint a new identity and start a
+            // fresh episode automatically (user order 2026-11-11). The
+            // auto-pair flag tells MainActivity to open Settings in split
+            // so the user can enter the new code.
+            if (PairingStateMachine.shouldAutoFreshKey(
+                    machine.state,
+                    lastPairMs?.let { System.currentTimeMillis() - it },
+                )
+            ) {
+                log.log("pair", "auto-fresh-stuck-key")
+                PairingStore.setAutoPairRequested(true)
+                pairFresh()
+                return
+            }
             if (PairingStateMachine.patientRetryExhausted(machine.patientAttempts)) break
             // A previously-verified key failing AUTH is a revoke, not a
             // landing: one retry rules out a transient, then give up fast
