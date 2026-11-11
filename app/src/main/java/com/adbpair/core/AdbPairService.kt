@@ -333,12 +333,27 @@ class AdbPairService : Service() {
         // Why discovery ended: the 12 s wait alone cannot tell a failed
         // start from a stopped scan from simply no dialog open.
         val reason = java.util.concurrent.atomic.AtomicReference("timeout-no-match")
-        val listener = object : android.net.nsd.NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) = Unit
-            override fun onServiceFound(serviceInfo: android.net.nsd.NsdServiceInfo) {
+        // onServiceFound hands back an UNRESOLVED service (port 0, host
+        // null) until resolveService returns. Reading serviceInfo.port
+        // there always yields 0, so the episode died with "found" but port
+        // none (device-proven 2026-11-11). Resolve first; only the
+        // resolved port counts.
+        val resolveListener = object : android.net.nsd.NsdManager.ResolveListener {
+            override fun onServiceResolved(serviceInfo: android.net.nsd.NsdServiceInfo) {
                 found.set(serviceInfo.port)
                 reason.set("found")
                 latch.countDown()
+            }
+            override fun onResolveFailed(serviceInfo: android.net.nsd.NsdServiceInfo, errorCode: Int) {
+                reason.set("resolve-failed:$errorCode")
+                latch.countDown()
+            }
+        }
+        val listener = object : android.net.nsd.NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) = Unit
+            override fun onServiceFound(serviceInfo: android.net.nsd.NsdServiceInfo) {
+                runCatching { manager.resolveService(serviceInfo, resolveListener) }
+                    .onFailure { reason.set("resolve-start-failed"); latch.countDown() }
             }
             override fun onServiceLost(serviceInfo: android.net.nsd.NsdServiceInfo) = Unit
             override fun onDiscoveryStopped(serviceType: String) { reason.set("stopped"); latch.countDown() }
