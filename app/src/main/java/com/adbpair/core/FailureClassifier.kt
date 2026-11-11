@@ -37,6 +37,8 @@ data class FailureContext(
     val wirelessOn: Boolean,
     /** Whether an identity (cert + key files) exists. */
     val keyPresent: Boolean,
+    /** Whether this identity was ever verified (a live connect succeeded). */
+    val keyPreviouslyVerified: Boolean = false,
 )
 
 object FailureClassifier {
@@ -54,6 +56,10 @@ object FailureClassifier {
                 val recentPair = context.minutesSincePair != null && context.minutesSincePair < 10
                 when {
                     recentPair -> FailureKind.KEY_LANDING
+                    // A previously-verified key failing AUTH is a revoke, not
+                    // a landing: one retry rules out a transient, then it is
+                    // EXPIRED (G2 — cuts revoke detection from 7 min to ~30 s).
+                    context.keyPreviouslyVerified && context.patientAttempts >= 1 -> FailureKind.EXPIRED
                     PairingStateMachine.patientRetryExhausted(context.patientAttempts) -> FailureKind.EXPIRED
                     else -> FailureKind.AUTH
                 }

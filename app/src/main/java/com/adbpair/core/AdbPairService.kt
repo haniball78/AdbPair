@@ -55,6 +55,9 @@ class AdbPairService : Service() {
         createChannel()
         startForeground(FOREGROUND_ID, stateNotification(getString(R.string.svc_starting)))
         registerNetworkCallback()
+        // Restore the "recent pair" signal across a process restart (G7):
+        // without it the classifier loses KEY_LANDING after a reboot.
+        lastPairMs = PairingStore.getLastPairMs(applicationContext)
         PairingStore.update {
             it.copy(
                 checklistDone = PairingStore.isChecklistDone(applicationContext),
@@ -62,6 +65,7 @@ class AdbPairService : Service() {
             )
         }
         log.log("service", "created")
+        scope.launch { heartbeatLoop() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -74,6 +78,7 @@ class AdbPairService : Service() {
                 scope.launch { submitCode(code, port) }
             }
             ACTION_FORGET -> scope.launch { forget() }
+            ACTION_PAIR_FRESH -> scope.launch { pairFresh() }
             ACTION_SET_GRANT_TOGGLE -> {
                 val on = intent.getBooleanExtra(EXTRA_GRANT_ON, true)
                 PairingStore.setGrantToggle(applicationContext, on)
@@ -81,6 +86,9 @@ class AdbPairService : Service() {
                     scope.launch { revokeGrantIfConnected() }
                 }
             }
+            // Null/unknown intent = the system restarting the service after
+            // a kill (START_STICKY): resume, don't sit idle (G3).
+            else -> scope.launch { resume() }
         }
         return START_STICKY
     }
@@ -125,8 +133,10 @@ class AdbPairService : Service() {
         setUi(PairingState.RESUMING, getString(R.string.state_resuming))
         log.log("resume", "started")
         val host = client.savedHost() ?: AdbClient.LOOPBACK
+        // Bound the resolve to 5 s so a resume (no saved port) stays inside
+        // the 8 s budget instead of waiting out the 12 s mDNS default (G6).
         val resolution = PortChain(AndroidPortSource(applicationContext))
-            .resolve(client.savedPort(), host)
+            .resolve(client.savedPort(), host, discoverTimeoutSeconds = 5)
         if (resolution == null) {
             log.log("resume", "no-port")
             machine.transition(PairingEvent.UNREACHABLE)
@@ -164,6 +174,7 @@ class AdbPairService : Service() {
                 patientAttempts = machine.patientAttempts,
                 wirelessOn = wirelessOn,
                 keyPresent = client.fingerprint() != null,
+                keyPreviouslyVerified = PairingStore.isIdentityVerified(applicationContext),
             ),
         )
         log.log(
@@ -200,6 +211,9 @@ class AdbPairService : Service() {
 
     /** After a verified connect: self-grant (approved) + read the 7-day expiry setting. */
     private suspend fun afterConnected(host: String, port: Int) {
+        // This identity is now verified: a later AUTH failure on it is a
+        // revoke, not a landing (G2).
+        PairingStore.setIdentityVerified(applicationContext, true)
         val toggleOn = PairingStore.isGrantToggleOn(applicationContext)
         // Trust the grant's own result: checkSelfPermission can read stale
         // right after a pm grant (device-proven 2026-11-11 — "grant
@@ -230,6 +244,10 @@ class AdbPairService : Service() {
         var attempts = 0
         while (machine.state == PairingState.PARKED_AUTH || machine.state == PairingState.PAIRING_WAIT_KEY) {
             if (PairingStateMachine.patientRetryExhausted(machine.patientAttempts)) break
+            // A previously-verified key failing AUTH is a revoke, not a
+            // landing: one retry rules out a transient, then give up fast
+            // (G2 — ~30 s instead of 7 min).
+            if (machine.patientAttempts >= 1 && PairingStore.isIdentityVerified(applicationContext)) break
             delay(PairingStateMachine.PATIENT_RETRY_DELAY_MS)
             attempts += 1
             log.log("retry", "attempt", mapOf("n" to attempts.toString(), "port" to port.toString()))
@@ -305,7 +323,9 @@ class AdbPairService : Service() {
             setUi(PairingState.IDLE, getString(R.string.err_pair_failed))
             return
         }
-        lastPairMs = System.currentTimeMillis()
+        val now = System.currentTimeMillis()
+        lastPairMs = now
+        PairingStore.setLastPairMs(applicationContext, now)
         val fingerprint = client.fingerprint()
         machine.transition(PairingEvent.PAIR_SUCCEEDED)
         log.log(
@@ -389,8 +409,23 @@ class AdbPairService : Service() {
         machine.transition(PairingEvent.FORGET_REQUESTED)
         client.forgetIdentity()
         lastPairMs = null
+        PairingStore.setLastPairMs(applicationContext, 0L)
+        PairingStore.setIdentityVerified(applicationContext, false)
         log.log("pair", "forgot-identity")
         setUi(PairingState.IDLE, getString(R.string.state_forgotten))
+    }
+
+    /** One-tap recovery from a revoked/expired identity: forget the dead
+     * identity (no confirm dialog — it is already dead) and start a fresh
+     * pairing episode (G2). */
+    private suspend fun pairFresh() {
+        machine.transition(PairingEvent.FORGET_REQUESTED)
+        client.forgetIdentity()
+        lastPairMs = null
+        PairingStore.setLastPairMs(applicationContext, 0L)
+        PairingStore.setIdentityVerified(applicationContext, false)
+        log.log("pair", "forgot-identity-fresh")
+        startPairingEpisode()
     }
 
     // ── Network change ────────────────────────────────────────────────
@@ -402,17 +437,44 @@ class AdbPairService : Service() {
             .build()
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                // Re-validate even when CONNECTED: the daemon port may have
+                // changed while the network was away (G1). The throttle is
+                // only consumed by a real resume attempt (G4).
                 val now = System.currentTimeMillis()
                 if (now - lastNetworkAttemptMs < 10_000L) return
                 lastNetworkAttemptMs = now
-                if (machine.state != PairingState.CONNECTED) {
-                    log.log("network", "changed-resume")
-                    scope.launch { resume() }
-                }
+                log.log("network", "changed-resume")
+                scope.launch { resume() }
+            }
+
+            override fun onLost(network: Network) {
+                // The network went away: stop showing a false green. Resume
+                // so the state becomes STALE (or stays CONNECTED if the
+                // loopback daemon is still reachable) (G1). No throttle
+                // here: losing the network is urgent, and resume() itself
+                // guards against concurrent runs.
+                log.log("network", "lost-resume")
+                scope.launch { resume() }
             }
         }
         networkCallback = callback
         runCatching { manager.registerNetworkCallback(request, callback) }
+    }
+
+    /** While CONNECTED, re-probe every 60 s so a silently dead connection is
+     * noticed within a minute instead of never (G1). A failed probe triggers
+     * a full resume (re-classify); a good probe leaves the state alone, so
+     * there is no UI flicker while healthy. */
+    private suspend fun heartbeatLoop() {
+        while (true) {
+            delay(60_000L)
+            if (machine.state != PairingState.CONNECTED) continue
+            val host = PairingStore.state.value.host ?: AdbClient.LOOPBACK
+            val port = PairingStore.state.value.port ?: client.savedPort() ?: continue
+            if (runCatching { client.connectAndProbe(host, port) }.getOrDefault(false)) continue
+            log.log("connect", "heartbeat-failed", mapOf("port" to port.toString()))
+            resume()
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────
@@ -534,6 +596,7 @@ class AdbPairService : Service() {
         const val ACTION_PAIR = "com.adbpair.action.PAIR"
         const val ACTION_SUBMIT_CODE = "com.adbpair.action.SUBMIT_CODE"
         const val ACTION_FORGET = "com.adbpair.action.FORGET"
+        const val ACTION_PAIR_FRESH = "com.adbpair.action.PAIR_FRESH"
         const val ACTION_SET_GRANT_TOGGLE = "com.adbpair.action.SET_GRANT_TOGGLE"
         const val EXTRA_CODE = "code"
         const val EXTRA_PORT = "port"
@@ -551,5 +614,8 @@ class AdbPairService : Service() {
 
         fun forgetIntent(context: Context): Intent =
             Intent(context, AdbPairService::class.java).apply { action = ACTION_FORGET }
+
+        fun pairFreshIntent(context: Context): Intent =
+            Intent(context, AdbPairService::class.java).apply { action = ACTION_PAIR_FRESH }
     }
 }

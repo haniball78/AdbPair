@@ -57,6 +57,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-validate the connection when the app comes forward (G1):
+        // a dead connection is noticed on open, not only on a tap.
+        startForegroundService(AdbPairService.resumeIntent(this))
+    }
 }
 
 @Composable
@@ -142,6 +149,15 @@ private fun AdbPairScreen(activity: MainActivity) {
             OutlinedButton(onClick = { showForgetConfirm = true }) {
                 Text(text = activity.getString(R.string.title_forget))
             }
+        }
+
+        // One-tap recovery from a revoked/expired identity (G2). Shown only
+        // when the state is STALE because the pairing expired or was revoked
+        // (the detail is exactly err_expired in that case).
+        if (state.state == PairingState.STALE && state.detail == activity.getString(R.string.err_expired)) {
+            Button(onClick = {
+                activity.startService(AdbPairService.pairFreshIntent(activity))
+            }) { Text(text = activity.getString(R.string.title_pair_fresh)) }
         }
 
         Card(modifier = Modifier.fillMaxWidth()) {

@@ -23,6 +23,7 @@
     <string name="err_port_format">يجب أن يكون المنفذ بين 1 و 65535</string>
     <string name="err_pair_failed">فشل الاقتران — تحقق من الرمز والمنفذ ثم حاول مجدداً</string>
     <string name="title_pair">اقتران</string>
+    <string name="title_pair_fresh">اقتران بهوية جديدة</string>
     <string name="title_resume">استئناف</string>
     <string name="title_forget">نسيان كل شيء</string>
     <string name="forget_confirm_title">نسيان الاقتران؟</string>

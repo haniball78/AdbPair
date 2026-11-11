@@ -23,6 +23,7 @@
     <string name="err_port_format">The port must be between 1 and 65535</string>
     <string name="err_pair_failed">Pairing failed — check the code and the port, then try again</string>
     <string name="title_pair">Pair</string>
+    <string name="title_pair_fresh">Pair with a new identity</string>
     <string name="title_resume">Resume</string>
     <string name="title_forget">Forget everything</string>
     <string name="forget_confirm_title">Forget the pairing?</string>

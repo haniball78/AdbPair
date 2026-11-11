@@ -111,20 +111,6 @@ class AdbClient(private val context: Context) {
             .takeIf { it >= 0 }
     }.getOrNull()
 
-    /** Re-enable wireless debugging via the shell (only when the grant is held). */
-    fun setWirelessDebugging(host: String, port: Int, enabled: Boolean): Boolean {
-        if (!enabled) {
-            return runCatching {
-                shell(host, port, "settings put global adb_wifi_enabled 0", 10_000L).exitCode == 0
-            }.getOrDefault(false)
-        }
-        return runCatching {
-            shell(host, port, "settings put global adb_wifi_enabled 0", 10_000L)
-            Thread.sleep(1500)
-            shell(host, port, "settings put global adb_wifi_enabled 1", 10_000L).exitCode == 0
-        }.getOrDefault(false)
-    }
-
     /** Strong reset: delete identity + ports. The next ensureIdentity mints a NEW keypair. */
     fun forgetIdentity() {
         for (name in listOf(CERT_FILE, KEY_FILE, HOST_FILE, CONNECTION_FILE)) {

@@ -10,13 +10,36 @@ class FailureClassifierTest {
         patientAttempts: Int = 0,
         wirelessOn: Boolean = true,
         keyPresent: Boolean = true,
-    ) = FailureContext(minutesSincePair, patientAttempts, wirelessOn, keyPresent)
+        keyPreviouslyVerified: Boolean = false,
+    ) = FailureContext(minutesSincePair, patientAttempts, wirelessOn, keyPresent, keyPreviouslyVerified)
 
     @Test
     fun `AUTH right after a pair is KEY_LANDING never re-mint`() {
         assertEquals(
             FailureKind.KEY_LANDING,
             FailureClassifier.classify("AdbPairAuthException", context(minutesSincePair = 2)),
+        )
+    }
+
+    @Test
+    fun `AUTH on a previously verified key is EXPIRED after one retry`() {
+        assertEquals(
+            FailureKind.EXPIRED,
+            FailureClassifier.classify(
+                "AdbPairAuthException",
+                context(minutesSincePair = 60, patientAttempts = 1, keyPreviouslyVerified = true),
+            ),
+        )
+    }
+
+    @Test
+    fun `AUTH on a never verified key is plain AUTH retry`() {
+        assertEquals(
+            FailureKind.AUTH,
+            FailureClassifier.classify(
+                "AdbPairAuthException",
+                context(minutesSincePair = 60, patientAttempts = 1, keyPreviouslyVerified = false),
+            ),
         )
     }
 
