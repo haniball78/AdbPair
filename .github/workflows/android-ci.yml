@@ -16,8 +16,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # No setup-android step: the runner's preinstalled SDK is used (AGP reads ANDROID_HOME). setup-android@v3 fails here — it installs the removed `tools` package.
       - name: Build debug APK
         run: ./gradlew assembleDebug
       - name: Upload APK
