@@ -20,6 +20,10 @@ import android.provider.Settings
  *   PRIMARY windowing mode. The divider-swap hint is the only remedy.
  * - SettingsActivity has no onNewIntent: re-sending the intent while
  *   Settings is open does nothing. Bring-forward uses NEW_TASK | CLEAR_TOP.
+ * - A plain relaunch reuses the existing Settings task and ignores the
+ *   windowing mode: it can never split when Settings is already open, and
+ *   it can exit a split that was open (device-proven 2026-11-11). The
+ *   retry launches Settings into a new task adjacent to ours instead.
  * - CLEAR_TASK / MULTIPLE_TASK landing flags are withdrawn (device-proven
  *   ineffective, and they destroy task restoration). They are not used here.
  */
@@ -60,19 +64,72 @@ object SettingsNavigator {
         val applied = launchAdjacent(activity, intent)
         Handler(Looper.getMainLooper()).postDelayed({
             if (!activity.isInMultiWindowMode) {
-                // Split did not engage: fall back to a plain launch.
-                runCatching {
-                    activity.startActivity(
-                        developmentSettingsIntent().apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
-                    )
-                }
+                // The split did not engage: retry into a new task adjacent
+                // to ours. A plain relaunch here only brings the existing
+                // Settings task forward fullscreen (or exits an open split).
+                launchAdjacentTaskOrPlain(activity)
             }
         }, PAIRING_STAGE_DELAY_MS)
         if (!applied) {
+            launchAdjacentTaskOrPlain(activity)
+        }
+    }
+
+    /** Adjacent-task retry, falling back to a plain launch when unavailable. */
+    private fun launchAdjacentTaskOrPlain(activity: Activity) {
+        if (!launchAdjacentTask(activity)) {
             runCatching {
                 activity.startActivity(
                     developmentSettingsIntent().apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
                 )
+            }
+        }
+    }
+
+    /**
+     * Launch Settings into a new task adjacent to ours. A plain relaunch
+     * reuses the existing Settings task and ignores the windowing mode, so
+     * it can never split when Settings is already open (device-proven
+     * 2026-11-11). The adjacent-task id is a hidden API; absent on older
+     * runtimes it fails soft and the caller falls back to a plain launch.
+     */
+    private fun launchAdjacentTask(activity: Activity): Boolean = runCatching {
+        val options = ActivityOptions.makeBasic()
+        ActivityOptions::class.java.getMethod(
+            "setLaunchAdjacentTaskId", Int::class.javaPrimitiveType,
+        ).invoke(options, activity.taskId)
+        applySplitWindowing(options)
+        activity.startActivityForResult(
+            developmentSettingsIntent().apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) },
+            REQUEST_PAIRING_SETTINGS, options.toBundle(),
+        )
+        true
+    }.getOrDefault(false)
+
+    /**
+     * Adjacent launch with the hidden windowing mode (reflection: the API is
+     * hidden since API 28). Returns false only when the launch itself
+     * throws; a missing windowing mode degrades to the LAUNCH_ADJACENT flag.
+     */
+    private fun launchAdjacent(activity: Activity, intent: Intent): Boolean = runCatching {
+        val options = ActivityOptions.makeBasic()
+        applySplitWindowing(options)
+        activity.startActivityForResult(intent, REQUEST_PAIRING_SETTINGS, options.toBundle())
+        true
+    }.getOrDefault(false)
+
+    /** Split windowing mode (PRIMARY) + create mode (TOP_OR_LEFT), best-effort. */
+    private fun applySplitWindowing(options: ActivityOptions) {
+        runCatching {
+            ActivityOptions::class.java.getMethod(
+                "setLaunchWindowingMode", Int::class.javaPrimitiveType,
+            ).invoke(options, 3)
+            // WINDOWING_MODE_SPLIT_SCREEN_PRIMARY = 3;
+            // SPLIT_SCREEN_CREATE_MODE_TOP_OR_LEFT = 0.
+            runCatching {
+                ActivityOptions::class.java.getMethod(
+                    "setSplitScreenCreateMode", Int::class.javaPrimitiveType,
+                ).invoke(options, 0)
             }
         }
     }
@@ -96,20 +153,4 @@ object SettingsNavigator {
             }
         }, CLOSE_SETTINGS_DELAY_MS)
     }
-
-    /**
-     * Adjacent launch with the hidden windowing mode (reflection: the API is
-     * hidden since API 28). Returns false when reflection is unavailable —
-     * the caller falls back to a plain launch.
-     */
-    private fun launchAdjacent(activity: Activity, intent: Intent): Boolean = runCatching {
-        val options = ActivityOptions.makeBasic()
-        val method = ActivityOptions::class.java.getMethod(
-            "setLaunchWindowingMode", Int::class.javaPrimitiveType,
-        )
-        // WINDOWING_MODE_SPLIT_SCREEN_PRIMARY = 3.
-        method.invoke(options, 3)
-        activity.startActivityForResult(intent, REQUEST_PAIRING_SETTINGS, options.toBundle())
-        true
-    }.getOrDefault(false)
 }
