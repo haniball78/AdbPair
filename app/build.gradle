@@ -22,6 +22,15 @@ android {
         }
     }
 
+    // BouncyCastle 1.79 jars (bcprov/bcpkix/bcutil) all ship this OSGi
+    // manifest; excluding it is the standard fix for the duplicate-file
+    // mergeDebugJavaResource failure (same line DroidDeck carries).
+    packaging {
+        resources {
+            excludes += ['META-INF/versions/9/OSGI-INF/MANIFEST.MF']
+        }
+    }
+
     lint {
         disable 'ExpiredTargetSdkVersion'
     }
