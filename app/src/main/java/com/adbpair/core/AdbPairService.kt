@@ -111,6 +111,16 @@ class AdbPairService : Service() {
 
     private suspend fun resume() {
         if (machine.state == PairingState.RESUMING) return
+        // A pairing episode owns the UI while it runs: a resume here would
+        // overwrite the pairing panel with RESUMING/STALE while the machine
+        // stays in PAIRING (the state table ignores RESUME_REQUESTED there),
+        // leaving the machine wedged and the panel gone (device-proven
+        // 2026-11-11). The network callback and activity recreation both
+        // call resume, so this guard is the only thing protecting the panel.
+        if (machine.state == PairingState.PAIRING || machine.state == PairingState.PAIRING_WAIT_KEY) {
+            log.log("resume", "skipped-pairing")
+            return
+        }
         machine.transition(PairingEvent.RESUME_REQUESTED)
         setUi(PairingState.RESUMING, getString(R.string.state_resuming))
         log.log("resume", "started")
@@ -236,7 +246,10 @@ class AdbPairService : Service() {
     // ── Fresh-pair path ────────────────────────────────────────────────
 
     private suspend fun startPairingEpisode() {
-        if (machine.state == PairingState.PAIRING || machine.state == PairingState.PAIRING_WAIT_KEY) return
+        if (machine.state == PairingState.PAIRING || machine.state == PairingState.PAIRING_WAIT_KEY) {
+            log.log("pair", "episode-already-active")
+            return
+        }
         machine.transition(PairingEvent.PAIR_REQUESTED)
         setUi(PairingState.PAIRING, getString(R.string.state_pairing))
         log.log("pair", "episode-started")
@@ -247,6 +260,20 @@ class AdbPairService : Service() {
             pairingPort = discoverPairingPort()
             log.log("pair", "port", mapOf("port" to (pairingPort?.toString() ?: "none")))
             PairingStore.update { it.copy(port = pairingPort) }
+            // Discovery found no pairing service: the episode is dead.
+            // Exit PAIRING via DIALOG_DEAD so a later Pair tap starts a
+            // fresh episode instead of hitting the guard above forever
+            // (device-proven wedge 2026-11-11). Only when still PAIRING:
+            // a submitted code moves the machine to PAIRING_WAIT_KEY, and
+            // a failed submit moves it to IDLE — neither is touched here.
+            if (pairingPort == null) {
+                val before = machine.state
+                val after = machine.transition(PairingEvent.DIALOG_DEAD)
+                if (before == PairingState.PAIRING && after == PairingState.IDLE) {
+                    log.log("pair", "dialog-dead")
+                    setUi(PairingState.IDLE, getString(R.string.err_no_pair_port))
+                }
+            }
             postPairingNotification()
         }
         postPairingNotification()
@@ -303,22 +330,29 @@ class AdbPairService : Service() {
         val manager = applicationContext.getSystemService(Context.NSD_SERVICE) as android.net.nsd.NsdManager
         val latch = java.util.concurrent.CountDownLatch(1)
         val found = java.util.concurrent.atomic.AtomicInteger(-1)
+        // Why discovery ended: the 12 s wait alone cannot tell a failed
+        // start from a stopped scan from simply no dialog open.
+        val reason = java.util.concurrent.atomic.AtomicReference("timeout-no-match")
         val listener = object : android.net.nsd.NsdManager.DiscoveryListener {
             override fun onDiscoveryStarted(serviceType: String) = Unit
             override fun onServiceFound(serviceInfo: android.net.nsd.NsdServiceInfo) {
                 found.set(serviceInfo.port)
+                reason.set("found")
                 latch.countDown()
             }
             override fun onServiceLost(serviceInfo: android.net.nsd.NsdServiceInfo) = Unit
-            override fun onDiscoveryStopped(serviceType: String) { latch.countDown() }
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { latch.countDown() }
+            override fun onDiscoveryStopped(serviceType: String) { reason.set("stopped"); latch.countDown() }
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) { reason.set("start-failed:$errorCode"); latch.countDown() }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) { latch.countDown() }
         }
         return try {
             manager.discoverServices("_adb-tls-pairing._tcp.", android.net.nsd.NsdManager.PROTOCOL_DNS_SD, listener)
             latch.await(12, java.util.concurrent.TimeUnit.SECONDS)
-            found.get().takeIf { it in 1..65535 }
+            val port = found.get().takeIf { it in 1..65535 }
+            log.log("pair", "discover", mapOf("reason" to (reason.get() ?: "unknown"), "port" to (port?.toString() ?: "none")))
+            port
         } catch (_: Exception) {
+            log.log("pair", "discover", mapOf("reason" to "exception"))
             null
         } finally {
             runCatching { manager.stopServiceDiscovery(listener) }

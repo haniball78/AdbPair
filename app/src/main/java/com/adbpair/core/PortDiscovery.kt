@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.util.ArrayDeque
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -47,6 +48,26 @@ class PortChain(private val liveSource: LivePortSource) {
     }
 }
 
+/**
+ * Every IP address owned by this device: loopback plus one per network
+ * interface (Wi-Fi, Tailscale, …). adbd advertises its services on the
+ * device's active interface address — on this phone the Tailscale IP
+ * (100.108.219.22), never loopback — so a loopback-only match could never
+ * see our own _adb-tls-connect service (device-proven 2026-11-11).
+ */
+fun ownAddresses(): Set<InetAddress> = runCatching {
+    val out = mutableSetOf<InetAddress>()
+    out += InetAddress.getLoopbackAddress()
+    NetworkInterface.getNetworkInterfaces()?.asSequence()
+        ?.flatMap { it.inetAddresses.asSequence() }
+        ?.forEach { out += it }
+    out.toSet()
+}.getOrDefault(setOf(InetAddress.getLoopbackAddress()))
+
+/** True when [address] is one of this device's own addresses. Byte comparison. */
+fun isOwnServiceAddress(address: InetAddress, own: Set<InetAddress> = ownAddresses()): Boolean =
+    own.any { it.address.contentEquals(address.address) }
+
 /** Android implementation of the live sources. */
 class AndroidPortSource(private val context: Context) : LivePortSource {
 
@@ -64,9 +85,12 @@ class AndroidPortSource(private val context: Context) : LivePortSource {
      */
     override fun discover(host: String, timeoutSeconds: Long): Int? {
         val manager = context.applicationContext.getSystemService(Context.NSD_SERVICE) as NsdManager
-        val paired = runCatching { InetAddress.getByName(host) }.getOrNull() ?: return null
-        val matches: (InetAddress) -> Boolean =
-            if (paired.isLoopbackAddress) ::isLocalAddress else { address -> address.address.contentEquals(paired.address) }
+        // The target is this device itself (host is LOOPBACK): any of our own
+        // interface addresses is a match. The old loopback-only match could
+        // never see adbd's service, which advertises the active interface
+        // address. host is kept for the LivePortSource interface.
+        val own = ownAddresses()
+        val matches: (InetAddress) -> Boolean = { address -> isOwnServiceAddress(address, own) }
         val resolvedPort = AtomicInteger(-1)
         val finished = AtomicBoolean(false)
         val latch = CountDownLatch(1)
@@ -131,12 +155,5 @@ class AndroidPortSource(private val context: Context) : LivePortSource {
             runCatching { manager.stopServiceDiscovery(discoveryListener) }
         }
         return resolvedPort.get().takeIf { it in 1..65535 }
-    }
-
-    companion object {
-        /** Loopback matching: any local address counts (127.0.0.1, ::1, 0.0.0.0). */
-        fun isLocalAddress(address: InetAddress): Boolean =
-            address.isLoopbackAddress || address.isLinkLocalAddress ||
-                address.hostAddress == "127.0.0.1" || address.hostAddress == "::1"
     }
 }

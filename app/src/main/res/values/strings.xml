@@ -15,6 +15,7 @@
     <string name="state_pairing">Pairing…</string>
     <string name="state_forgotten">Pairing forgotten — a new identity will be minted on the next pair</string>
     <string name="err_no_port">No connect port found — open wireless debugging and try again</string>
+    <string name="err_no_pair_port">No pairing port found — open the pairing dialog and try again</string>
     <string name="err_toggle_off">Wireless debugging is off — turn it on and retry</string>
     <string name="err_expired">The pairing expired or was revoked — pair again with a new identity</string>
     <string name="err_unreachable">Nothing answers on any port — check wireless debugging and retry</string>

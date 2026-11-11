@@ -15,6 +15,7 @@
     <string name="state_pairing">جارٍ الاقتران…</string>
     <string name="state_forgotten">تم نسيان الاقتران — ستُولد هوية جديدة عند الاقتران التالي</string>
     <string name="err_no_port">لم يتم العثور على منفذ اتصال — افتح التصحيح اللاسلكي وحاول مجدداً</string>
+    <string name="err_no_pair_port">لم يتم العثور على منفذ اقتران — افتح نافذة الاقتران وحاول مجدداً</string>
     <string name="err_toggle_off">التصحيح اللاسلكي مطفأ — شغّله وحاول مجدداً</string>
     <string name="err_expired">انتهى الاقتران أو أُلغي تفويضه — أعد الاقتران بهوية جديدة</string>
     <string name="err_unreachable">لا رد على أي منفذ — تحقق من التصحيح اللاسلكي وحاول مجدداً</string>

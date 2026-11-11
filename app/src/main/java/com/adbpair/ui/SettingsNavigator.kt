@@ -45,14 +45,20 @@ object SettingsNavigator {
         }
     }
 
-    /** Staged launch: Settings first, then the pairing work 400 ms later. */
+    /**
+     * Staged launch: pairing work first, Settings second. The episode must
+     * start while this app is still foreground: opening Settings can
+     * dismiss an already-open pairing dialog, and a backgrounded activity
+     * may not be able to start the service (device-proven 2026-11-11 —
+     * every submit failed because the dialog died after the switch).
+     */
     fun startPairing(activity: Activity, onStageTwo: () -> Unit) {
+        onStageTwo()
         val intent = developmentSettingsIntent().apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
         }
         val applied = launchAdjacent(activity, intent)
         Handler(Looper.getMainLooper()).postDelayed({
-            onStageTwo()
             if (!activity.isInMultiWindowMode) {
                 // Split did not engage: fall back to a plain launch.
                 runCatching {

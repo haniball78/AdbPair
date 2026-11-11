@@ -17,7 +17,7 @@ jobs:
           distribution: temurin
           java-version: '17'
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --tests "com.adbpair.core.PairingStateMachineTest" --tests "com.adbpair.core.FailureClassifierTest" --tests "com.adbpair.core.AdbIdentityTest" --tests "com.adbpair.core.PortChainTest" --tests "com.adbpair.core.DiagnosticsLogTest"
+        run: ./gradlew testDebugUnitTest --tests "com.adbpair.core.PairingStateMachineTest" --tests "com.adbpair.core.FailureClassifierTest" --tests "com.adbpair.core.AdbIdentityTest" --tests "com.adbpair.core.PortChainTest" --tests "com.adbpair.core.DiagnosticsLogTest" --tests "com.adbpair.core.PortDiscoveryTest"
       - name: Print per-test summary
         if: always()
         run: |
