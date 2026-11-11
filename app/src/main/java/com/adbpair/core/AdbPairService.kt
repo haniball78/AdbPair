@@ -491,8 +491,15 @@ class AdbPairService : Service() {
                 this, 1, replyIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
             )
+            // An action without an icon does not render its button in the
+            // shade on this device (device-proven 2026-11-11: the action
+            // existed with a RemoteInput, but no "Enter code" button ever
+            // appeared, so the code could not be submitted without leaving
+            // Settings — which kills the dialog). Give it an icon.
             val action = Notification.Action.Builder(
-                null, getString(R.string.notif_code_action), replyPending,
+                android.graphics.drawable.Icon.createWithResource(
+                    this, android.R.drawable.ic_menu_edit,
+                ), getString(R.string.notif_code_action), replyPending,
             ).addRemoteInput(remoteInput).build()
             builder.addAction(action)
         }
