@@ -11,12 +11,14 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlinx.coroutines.withTimeout
 
 data class ShellResult(val exitCode: Int, val output: String, val allOutput: String)
 
 /**
- * The Kadb wrapper. Every blocking call runs on a dedicated thread with a
- * CANCELLABLE timeout: Kadb itself has no timeouts (Kadb.pair can hang
+ * The Kadb wrapper. Blocking calls run on a dedicated thread with a
+ * CANCELLABLE timeout; pair() is a suspend function and times out via
+ * withTimeout instead. Kadb itself has no timeouts (Kadb.pair can hang
  * forever — the 2026-11-09 first-pair hang). On timeout the future is
  * abandoned and the state guard released; the orphaned socket thread
  * finishes on its own and is harmless — the state machine re-checks by
@@ -56,9 +58,11 @@ class AdbClient(private val context: Context) {
         return digest.joinToString("") { "%02x".format(it) }.take(16)
     }
 
-    fun pair(host: String, port: Int, code: String) {
+    suspend fun pair(host: String, port: Int, code: String) {
         ensureIdentity()
-        runWithTimeout(PairingStateMachine.PAIR_TIMEOUT_MS) {
+        // Kadb.pair is suspend (its shell calls are blocking). withTimeout is
+        // the cancellable timeout: a stuck pair surfaces as a failure, never a hang.
+        withTimeout(PairingStateMachine.PAIR_TIMEOUT_MS) {
             Kadb.pair(host, port, code, "AdbPair")
         }
         saveHost(host)
