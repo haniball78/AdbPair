@@ -201,18 +201,25 @@ class AdbPairService : Service() {
     /** After a verified connect: self-grant (approved) + read the 7-day expiry setting. */
     private suspend fun afterConnected(host: String, port: Int) {
         val toggleOn = PairingStore.isGrantToggleOn(applicationContext)
-        if (toggleOn && !client.hasWriteSecureSettingsGrant()) {
+        // Trust the grant's own result: checkSelfPermission can read stale
+        // right after a pm grant (device-proven 2026-11-11 — "grant
+        // granted" but the immediate re-check read false). If the grant
+        // call succeeded, the grant is held.
+        val grantedNow = if (toggleOn && !client.hasWriteSecureSettingsGrant()) {
             val granted = runCatching { client.grantWriteSecureSettings(host, port) }.getOrDefault(false)
             log.log("grant", if (granted) "granted" else "grant-failed")
+            granted
+        } else {
+            client.hasWriteSecureSettingsGrant()
         }
         val allowedMs = client.readAllowedConnectionTime()
         PairingStore.update {
-            it.copy(grantHeld = client.hasWriteSecureSettingsGrant(), allowedConnectionTimeMs = allowedMs)
+            it.copy(grantHeld = grantedNow, allowedConnectionTimeMs = allowedMs)
         }
         log.log(
             "connect", "post",
             mapOf(
-                "grantHeld" to client.hasWriteSecureSettingsGrant().toString(),
+                "grantHeld" to grantedNow.toString(),
                 "allowedMs" to (allowedMs?.toString() ?: "unknown"),
             ),
         )
@@ -330,13 +337,12 @@ class AdbPairService : Service() {
         val manager = applicationContext.getSystemService(Context.NSD_SERVICE) as android.net.nsd.NsdManager
         val latch = java.util.concurrent.CountDownLatch(1)
         val found = java.util.concurrent.atomic.AtomicInteger(-1)
-        // Why discovery ended: the 30 s wait alone cannot tell a failed
+        // Why discovery ended: the 180 s wait alone cannot tell a failed
         // start from a stopped scan from simply no dialog open.
-        // 30 s (was 12 s): the user needs time to navigate Settings to
-        // the pairing dialog in the split-screen flow — the 12 s window
-        // expired before the dialog could be opened (device-proven
-        // 2026-11-11). The episode still ends cleanly on timeout
-        // (DIALOG_DEAD -> IDLE), just later.
+        // 180 s (3 minutes, his order 2026-11-11; was 12 s, then 30 s):
+        // the user needs time to navigate Settings to the pairing dialog
+        // and enter the code — there is no reason to rush it. The episode
+        // still ends cleanly on timeout (DIALOG_DEAD -> IDLE), just later.
         val reason = java.util.concurrent.atomic.AtomicReference("timeout-no-match")
         // onServiceFound hands back an UNRESOLVED service (port 0, host
         // null) until resolveService returns. Reading serviceInfo.port
@@ -367,7 +373,7 @@ class AdbPairService : Service() {
         }
         return try {
             manager.discoverServices("_adb-tls-pairing._tcp.", android.net.nsd.NsdManager.PROTOCOL_DNS_SD, listener)
-            latch.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            latch.await(180, java.util.concurrent.TimeUnit.SECONDS)
             val port = found.get().takeIf { it in 1..65535 }
             log.log("pair", "discover", mapOf("reason" to (reason.get() ?: "unknown"), "port" to (port?.toString() ?: "none")))
             port
@@ -416,13 +422,19 @@ class AdbPairService : Service() {
     }.getOrDefault(false)
 
     private fun errorNameOf(error: Throwable?): String? {
+        // The outermost wrapper (e.g. ExecutionException from a Future)
+        // hides the real error: the classifier matches on the name, so it
+        // fell to UNKNOWN for an unauthorized identity (device-proven
+        // 2026-11-11). Return the root cause's name — the most specific
+        // error in the chain.
         var current = error
+        var lastName: String? = null
         while (current != null) {
             val name = current.javaClass.simpleName
-            if (name.isNotEmpty()) return name
+            if (name.isNotEmpty()) lastName = name
             current = current.cause
         }
-        return null
+        return lastName
     }
 
     private fun setUi(

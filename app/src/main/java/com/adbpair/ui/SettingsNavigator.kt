@@ -58,6 +58,13 @@ object SettingsNavigator {
      */
     fun startPairing(activity: Activity, onStageTwo: () -> Unit) {
         onStageTwo()
+        if (activity.isInMultiWindowMode) {
+            // Already in split-screen (Settings is in the other pane):
+            // re-launching Settings reuses its task and ignores the split
+            // flags, which exits the open split (device-proven 2026-11-11).
+            // Just start the episode; the pair row is already visible.
+            return
+        }
         val intent = developmentSettingsIntent().apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
         }
