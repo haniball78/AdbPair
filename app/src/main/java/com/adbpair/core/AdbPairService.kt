@@ -248,7 +248,10 @@ class AdbPairService : Service() {
             // landing: one retry rules out a transient, then give up fast
             // (G2 — ~30 s instead of 7 min).
             if (machine.patientAttempts >= 1 && PairingStore.isIdentityVerified(applicationContext)) break
-            delay(PairingStateMachine.PATIENT_RETRY_DELAY_MS)
+            // Fast retry while a fresh pair's key is landing (5 s for the
+            // first minute), so the app connects within seconds of the key
+            // landing instead of up to 30 s later.
+            delay(PairingStateMachine.patientRetryDelayMs(machine.state, attempts))
             attempts += 1
             log.log("retry", "attempt", mapOf("n" to attempts.toString(), "port" to port.toString()))
             val resolution = PortChain(AndroidPortSource(applicationContext))

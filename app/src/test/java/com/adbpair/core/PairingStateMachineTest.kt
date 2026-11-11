@@ -78,6 +78,17 @@ class PairingStateMachineTest {
     }
 
     @Test
+    fun `key-landing retry is fast for the first minute, then normal`() {
+        // PAIRING_WAIT_KEY: 5 s for the first 12 attempts, then 30 s.
+        assertEquals(5_000L, PairingStateMachine.patientRetryDelayMs(PairingState.PAIRING_WAIT_KEY, 0))
+        assertEquals(5_000L, PairingStateMachine.patientRetryDelayMs(PairingState.PAIRING_WAIT_KEY, 11))
+        assertEquals(30_000L, PairingStateMachine.patientRetryDelayMs(PairingState.PAIRING_WAIT_KEY, 12))
+        // PARKED_AUTH (an old identity failing): always the normal 30 s.
+        assertEquals(30_000L, PairingStateMachine.patientRetryDelayMs(PairingState.PARKED_AUTH, 0))
+        assertEquals(30_000L, PairingStateMachine.patientRetryDelayMs(PairingState.CONNECTED, 0))
+    }
+
+    @Test
     fun `patient retry exhausts at fourteen`() {
         assertEquals(false, PairingStateMachine.patientRetryExhausted(13))
         assertEquals(true, PairingStateMachine.patientRetryExhausted(14))

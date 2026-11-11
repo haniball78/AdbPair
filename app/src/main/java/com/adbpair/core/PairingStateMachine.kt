@@ -141,11 +141,26 @@ class PairingStateMachine {
         const val MAX_PATIENT_RETRIES = 14
         const val PATIENT_RETRY_DELAY_MS = 30_000L
         const val PATIENT_RETRY_WINDOW_MS = 420_000L
+        /** Fast retry while a fresh pair's key is landing (PAIRING_WAIT_KEY):
+         * the key usually lands in seconds, so polling every 5 s catches it
+         * within seconds instead of up to 30 s. Applies to the first 12
+         * attempts (60 s); after that the normal 30 s delay resumes. */
+        const val PATIENT_RETRY_FAST_DELAY_MS = 5_000L
+        const val PATIENT_RETRY_FAST_ATTEMPTS = 12
         const val PAIR_TIMEOUT_MS = 60_000L
         const val RESUME_BUDGET_MS = 8_000L
         const val CONNECT_TIMEOUT_MS = 5_000L
         const val PROBE_TIMEOUT_MS = 3_000L
 
         fun patientRetryExhausted(attempts: Int): Boolean = attempts >= MAX_PATIENT_RETRIES
+
+        /** Delay before the next patient retry. Fast (5 s) while a fresh
+         * pair's key is landing, normal (30 s) otherwise. */
+        fun patientRetryDelayMs(state: PairingState, attempts: Int): Long =
+            if (state == PairingState.PAIRING_WAIT_KEY && attempts < PATIENT_RETRY_FAST_ATTEMPTS) {
+                PATIENT_RETRY_FAST_DELAY_MS
+            } else {
+                PATIENT_RETRY_DELAY_MS
+            }
     }
 }
