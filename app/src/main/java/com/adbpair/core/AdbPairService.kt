@@ -30,7 +30,11 @@ import kotlinx.coroutines.launch
  * with no UI open.
  *
  * Foreground type connectedDevice: the correct type for a pairing daemon, and
- * exempt from the background-start restriction and the 6 h/24 h cap.
+ * exempt from the background-start restriction and the 6 h/24 h cap. Android
+ * 14+ also requires one of the connected-device permissions for this type
+ * (CHANGE_NETWORK_STATE here: the service watches connectivity and reconnects
+ * on network change), or startForeground throws SecurityException — device-
+ * proven 2026-11-11, launch crash at onCreate before this permission existed.
  */
 class AdbPairService : Service() {
 
