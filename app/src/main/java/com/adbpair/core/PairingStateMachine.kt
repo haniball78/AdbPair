@@ -103,7 +103,14 @@ class PairingStateMachine {
                 else -> state
             }
             PairingState.PAIRING -> when (event) {
-                PairingEvent.PAIR_SUCCEEDED -> PairingState.PAIRING_WAIT_KEY
+                PairingEvent.PAIR_SUCCEEDED -> {
+                    // A new pair means a new key-landing window: the post-pair
+                    // retry gets a fresh budget. (Was: a pre-pair exhaustion
+                    // left the counter at 14, so the retry broke at once and
+                    // a fresh pair could never connect — device-proven 2026-11-11.)
+                    patientAttempts = 0
+                    PairingState.PAIRING_WAIT_KEY
+                }
                 PairingEvent.PAIR_FAILED, PairingEvent.PAIR_TIMEOUT,
                 PairingEvent.DIALOG_DEAD -> PairingState.IDLE
                 PairingEvent.FORGET_REQUESTED -> PairingState.IDLE

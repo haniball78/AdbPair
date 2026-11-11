@@ -61,6 +61,23 @@ class PairingStateMachineTest {
     }
 
     @Test
+    fun `a successful pair resets the patient budget after exhaustion`() {
+        // Device-proven 2026-11-11 (241c957): a fresh install's pre-pair
+        // retries exhausted the counter (14), so after a successful pair the
+        // post-pair retry broke at once and the pair could never connect.
+        // A new pair is a new key-landing window: fresh budget.
+        val machine = PairingStateMachine()
+        machine.transition(PairingEvent.RESUME_REQUESTED)
+        machine.transition(PairingEvent.AUTH_FAILED_FRESH)
+        repeat(14) { machine.transition(PairingEvent.AUTH_FAILED_PARKED) }
+        assertEquals(14, machine.patientAttempts)
+        assertEquals(PairingState.STALE, machine.transition(PairingEvent.REVOKED_OR_EXPIRED))
+        assertEquals(PairingState.PAIRING, machine.transition(PairingEvent.PAIR_REQUESTED))
+        assertEquals(PairingState.PAIRING_WAIT_KEY, machine.transition(PairingEvent.PAIR_SUCCEEDED))
+        assertEquals(0, machine.patientAttempts)
+    }
+
+    @Test
     fun `patient retry exhausts at fourteen`() {
         assertEquals(false, PairingStateMachine.patientRetryExhausted(13))
         assertEquals(true, PairingStateMachine.patientRetryExhausted(14))
