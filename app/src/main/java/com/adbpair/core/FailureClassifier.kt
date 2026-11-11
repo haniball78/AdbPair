@@ -55,12 +55,20 @@ object FailureClassifier {
             isAuth -> {
                 val recentPair = context.minutesSincePair != null && context.minutesSincePair < 10
                 when {
+                    // Exhaustion wins over recency: 14 attempts of active
+                    // polling is enough — if the key has not landed by then
+                    // it is stuck, and the right action is a fresh identity,
+                    // not more waiting. (With the 5 s fast retry the budget
+                    // exhausts in ~2 min, well inside the 10-min recent-pair
+                    // window, so without this the app would sit in
+                    // PAIRING_WAIT_KEY with no retry running and no
+                    // fresh-pair button.)
+                    PairingStateMachine.patientRetryExhausted(context.patientAttempts) -> FailureKind.EXPIRED
                     recentPair -> FailureKind.KEY_LANDING
                     // A previously-verified key failing AUTH is a revoke, not
                     // a landing: one retry rules out a transient, then it is
                     // EXPIRED (G2 — cuts revoke detection from 7 min to ~30 s).
                     context.keyPreviouslyVerified && context.patientAttempts >= 1 -> FailureKind.EXPIRED
-                    PairingStateMachine.patientRetryExhausted(context.patientAttempts) -> FailureKind.EXPIRED
                     else -> FailureKind.AUTH
                 }
             }

@@ -55,6 +55,21 @@ class FailureClassifierTest {
     }
 
     @Test
+    fun `AUTH after a recent pair but with the retry exhausted is EXPIRED not KEY_LANDING`() {
+        // Stuck key: the pair was 2 min ago but all 14 patient attempts are
+        // used up, so the key is stuck — a fresh identity, not more waiting.
+        // (Without the exhaustion-first order this returned KEY_LANDING and
+        // the app sat in PAIRING_WAIT_KEY with no retry running.)
+        assertEquals(
+            FailureKind.EXPIRED,
+            FailureClassifier.classify(
+                "AdbPairAuthException",
+                context(minutesSincePair = 2, patientAttempts = 14),
+            ),
+        )
+    }
+
+    @Test
     fun `AUTH otherwise is plain AUTH retry`() {
         assertEquals(
             FailureKind.AUTH,
